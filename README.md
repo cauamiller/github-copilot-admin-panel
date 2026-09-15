@@ -1,36 +1,20 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Copilot Admin Embraer
 
-## Getting Started
+Painel de administração do GitHub Copilot na enterprise: seats, cost centers, budgets, consumo, alertas e ações (criar/editar budgets, cost centers, mover usuários).
 
-First, run the development server:
+## Rodar
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev      # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+O token é lido no servidor de `GH_COPILOT` (ou `GITHUB_TOKEN` / `GH_TOKEN`) e nunca vai ao navegador. Se não estiver no ambiente, copie `.env.local.example` para `.env.local`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Estrutura
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/app/api/gh/[...path]` — proxy para `api.github.com` (só `/enterprises/{ent}/…`, `/user`, `/rate_limit`)
+- `src/lib/gh-client.ts` — cliente + paginação (deduplica: `cost-centers` ignora `per_page`)
+- `src/lib/derive.ts` — cruzamento seats × cost centers × budgets × user-states e regras de alerta
+- `src/lib/store.tsx` — carregamento em 2 fases, ações e histórico
+- `src/app/*` — uma rota por seção

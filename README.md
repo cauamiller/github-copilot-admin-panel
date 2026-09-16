@@ -18,3 +18,13 @@ O token é lido no servidor de `GH_COPILOT` (ou `GITHUB_TOKEN` / `GH_TOKEN`) e n
 - `src/lib/derive.ts` — cruzamento seats × cost centers × budgets × user-states e regras de alerta
 - `src/lib/store.tsx` — carregamento em 2 fases, ações e histórico
 - `src/app/*` — uma rota por seção
+
+## Rodar no Android (Debian/PRoot via SSH)
+
+O build precisa do SWC nativo, que não existe para armv7; por isso o build acontece no PC e só o runtime standalone vai para o celular (Node 20 do Debian basta).
+
+```bash
+scripts/deploy-android.sh root@192.168.1.17 8022   # builda, envia, (re)inicia
+```
+
+No celular fica em `/root/copilot-admin` (`start.sh` / `stop.sh`, token em `env` com chmod 600, log em `server.log`).

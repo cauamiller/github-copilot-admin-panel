@@ -161,3 +161,38 @@ export interface RateInfo {
   limit: number;
   reset: number;
 }
+
+/* ---------- relatório de cobrança por cost center ---------- */
+export interface BillingLine {
+  sku: string;
+  unitType: string;
+  quantity: number;
+  gross: number;
+  discount: number;
+  net: number;
+  items: number;
+}
+
+export interface BillingRow {
+  /** null = uso fora de qualquer cost center (faturado direto na enterprise) */
+  ccId: string | null;
+  name: string;
+  state: "active" | "deleted" | "enterprise";
+  members: number;
+  lines: BillingLine[];
+  userMonths: number;
+  credits: number;
+  premiumRequests: number;
+  gross: number;
+  discount: number;
+  net: number;
+  error?: string;
+}
+
+export interface BillingReport {
+  key: string; // YYYY-MM
+  year: number;
+  month: number;
+  generatedAt: number;
+  rows: BillingRow[];
+}

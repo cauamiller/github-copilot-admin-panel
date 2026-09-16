@@ -59,3 +59,25 @@ export function toCSV<T>(rows: T[], cols: { h: string; v: (r: T) => string | num
   };
   return [cols.map((c) => q(c.h)).join(";"), ...rows.map((r) => cols.map((c) => q(c.v(r))).join(";"))].join("\n");
 }
+
+export const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
+export const monthLabel = (y: number, m: number) => `${MONTHS[m - 1]}/${y}`;
+/** últimos N meses, do mais recente ao mais antigo */
+export function lastMonths(n: number): { year: number; month: number; key: string; label: string }[] {
+  const out = [];
+  const d = new Date();
+  for (let i = 0; i < n; i++) {
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    out.push({ year: y, month: m, key: monthKey(y, m), label: monthLabel(y, m) });
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+export function downloadText(filename: string, text: string, type = "text/csv;charset=utf-8") {
+  const blob = new Blob(["﻿" + text], { type }); // BOM: Excel abre UTF-8 com acentos certos
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}

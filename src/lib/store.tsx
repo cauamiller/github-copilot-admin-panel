@@ -3,9 +3,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { derive } from "./derive";
-import { ApiError, billing, gh, mapLimit, onRate, pageAll } from "./gh-client";
+import { ApiError, billing as billingPath, gh, mapLimit, onRate, pageAll } from "./gh-client";
 import { usd0 } from "./format";
-import type { Budget, BudgetScope, CCUsage, CostCenter, Derived, LogEntry, RateInfo, Seat, UsageItem, UserState } from "./types";
+import type { BillingLine, BillingReport, BillingRow, Budget, BudgetScope, CCUsage, CostCenter, Derived, LogEntry, RateInfo, Seat, UsageItem, UserState } from "./types";
+import { monthKey } from "./format";
 
 export interface Config {
   enterprise: string;
@@ -69,6 +70,8 @@ interface Store {
   reloadBudgets: () => Promise<void>;
   reloadCC: () => Promise<void>;
   loadCCUsage: () => Promise<void>;
+  billing: Record<string, BillingReport>;
+  loadBilling: (year: number, month: number, force?: boolean) => Promise<void>;
   runAction: (label: string, fn: () => Promise<string | void>, after?: () => Promise<void>) => Promise<void>;
   createBudget: (input: BudgetInput) => Promise<void>;
   editBudget: (id: string, body: { budget_amount: number; prevent_further_usage: boolean; expires_at?: string }) => Promise<void>;
@@ -96,6 +99,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [usage, setUsage] = useState<UsageItem[]>([]);
   const [userStates, setUserStates] = useState<Record<string, UserState[]>>({});
   const [ccUsage, setCCUsage] = useState<Record<string, CCUsage> | null>(null);
+  const [billing, setBilling] = useState<Record<string, BillingReport>>({});
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -107,7 +111,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const loadingRef = useRef(false);
 
   const ent = config?.enterprise ?? "embraer";
-  const bp = billing(ent);
+  const bp = billingPath(ent);
 
   useEffect(() => { const off = onRate(setRate); return () => { off(); }; }, []);
   useEffect(() => {
@@ -203,6 +207,44 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setCCUsage(res);
     setProgress(null);
   }, [d, bp]);
+
+  /** Uso faturado no mês por cost center (1 chamada por cost center + 1 para o que ficou fora). */
+  const loadBilling = useCallback(async (year: number, month: number, force = false) => {
+    const key = monthKey(year, month);
+    if (!force && billing[key]) return;
+    const memberCount = (c: CostCenter) => (c.resources ?? []).filter((r) => r.type === "User").length;
+    const targets: { ccId: string | null; name: string; state: BillingRow["state"]; members: number }[] = [
+      ...cc.map((c) => ({ ccId: c.id, name: c.name, state: c.state, members: memberCount(c) })),
+      { ccId: null, name: "Fora de cost centers (enterprise)", state: "enterprise" as const, members: 0 },
+    ];
+    setProgress({ label: `Relatório de ${key} (0/${targets.length})…`, value: 0 });
+    const rows: BillingRow[] = [];
+    await mapLimit(targets, 6, async (t) => {
+      const base: BillingRow = { ...t, lines: [], userMonths: 0, credits: 0, premiumRequests: 0, gross: 0, discount: 0, net: 0 };
+      try {
+        const j = await gh<{ usageItems: UsageItem[] }>(`${bp}/usage`, { params: { cost_center_id: t.ccId ?? undefined, year, month } });
+        const bySku: Record<string, BillingLine> = {};
+        for (const i of j.usageItems ?? []) {
+          const k = `${i.sku}|${i.unitType}`;
+          bySku[k] ??= { sku: i.sku, unitType: i.unitType, quantity: 0, gross: 0, discount: 0, net: 0, items: 0 };
+          const l = bySku[k];
+          l.quantity += i.quantity; l.gross += i.grossAmount || 0; l.discount += i.discountAmount || 0; l.net += i.netAmount || 0; l.items++;
+        }
+        base.lines = Object.values(bySku).sort((a, b) => b.gross - a.gross);
+        for (const l of base.lines) {
+          base.gross += l.gross; base.discount += l.discount; base.net += l.net;
+          if (l.unitType === "UserMonths") base.userMonths += l.quantity;
+          else if (l.unitType === "AICredits") base.credits += l.quantity;
+          else if (l.unitType === "Requests") base.premiumRequests += l.quantity;
+        }
+      } catch (e) {
+        base.error = (e as ApiError).body?.message || (e as Error).message;
+      }
+      rows.push(base);
+    }, (done, total) => setProgress({ label: `Relatório de ${key} (${done}/${total})…`, value: done / total }));
+    setBilling((b) => ({ ...b, [key]: { key, year, month, generatedAt: Date.now(), rows } }));
+    setProgress(null);
+  }, [bp, cc, billing]);
 
   const runAction = useCallback(async (label: string, fn: () => Promise<string | void>, after?: () => Promise<void>) => {
     try {
@@ -313,7 +355,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const value: Store = {
     config, configError, ent, me, cc, budgets, seats, usage, userStates, ccUsage, d, loadedAt, loading, progress, rate, error, log,
     clearLog: () => setLog([]),
-    loadAll, reloadBudgets, reloadCC, loadCCUsage, runAction,
+    loadAll, reloadBudgets, reloadCC, loadCCUsage, billing, loadBilling, runAction,
     createBudget, editBudget, deleteBudget, createCostCenters, deleteCostCenter, moveUsers, bulkCreateUserBudgets,
     openUser, openCC, showUser: setOpenUser, showCC: setOpenCC,
   };

@@ -49,7 +49,7 @@ export function UserDrawer() {
 
   return (
     <Sheet open={!!login} onOpenChange={(o) => !o && s.showUser(null)}>
-      <SheetContent className="sm:max-w-xl overflow-y-auto gap-0 p-0">
+      <SheetContent className="data-[side=right]:sm:max-w-2xl overflow-y-auto gap-0 p-0">
         {login && (
           <>
             <SheetHeader className="border-b px-5 py-4">
@@ -126,7 +126,7 @@ export function CCDrawer() {
 
   return (
     <Sheet open={!!id} onOpenChange={(o) => !o && s.showCC(null)}>
-      <SheetContent className="sm:max-w-xl overflow-y-auto gap-0 p-0">
+      <SheetContent className="data-[side=right]:sm:max-w-2xl overflow-y-auto gap-0 p-0">
         {r && (
           <>
             <SheetHeader className="border-b px-5 py-4">

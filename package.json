@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start -H 0.0.0.0 -p 3210",
+    "lint": "eslint",
+    "serve": "next build && next start -H 0.0.0.0 -p 3210"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -10,6 +10,16 @@ const mono = IBM_Plex_Mono({ variable: "--font-geist-mono", subsets: ["latin"], 
 export const metadata: Metadata = {
   title: "Copilot Admin Embraer",
   description: "Seats, cost centers, budgets e consumo do GitHub Copilot na enterprise",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Copilot Admin" },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0e1013" },
+  ],
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

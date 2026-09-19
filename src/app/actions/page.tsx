@@ -47,6 +47,11 @@ function Actions({ params }: { params: ReadonlyURLSearchParams }) {
   const d = s.d!;
   const confirm = useConfirm();
   const ccOptions = useMemo(() => d.activeCC.slice().sort((a, b) => a.name.localeCompare(b.name)), [d.activeCC]);
+  const groupOptions = useMemo(() => {
+    const m = new Map<string, { slug: string; name: string; n: number }>();
+    for (const u of d.users) { const t = u.seat.assigning_team; const k = t?.slug ?? "__none"; const e = m.get(k) ?? { slug: k, name: t?.name ?? "Sem grupo (atribuição direta)", n: 0 }; e.n++; m.set(k, e); }
+    return [...m.values()].sort((a, b) => b.n - a.n);
+  }, [d.users]);
 
   /* ---- create budget ---- */
   const [scope, setScope] = useState<BudgetScope>(() => (params.get("scope") as BudgetScope) || "user");
@@ -59,6 +64,7 @@ function Actions({ params }: { params: ReadonlyURLSearchParams }) {
   /* ---- bulk ---- */
   const [bulkAmount, setBulkAmount] = useState(19);
   const [bulkOnly, setBulkOnly] = useState("");
+  const [bulkGroup, setBulkGroup] = useState("");
   const [bulkExcl, setBulkExcl] = useState<string[]>([]);
   const [skipCC, setSkipCC] = useState(false);
   const [skipEnt, setSkipEnt] = useState(false);
@@ -109,6 +115,7 @@ function Actions({ params }: { params: ReadonlyURLSearchParams }) {
       .filter((u) => {
         if (u.ub) return false;
         if (bulkOnly === "__none" ? u.cc : bulkOnly && u.cc?.name !== bulkOnly) return false;
+        if (bulkGroup && (u.seat.assigning_team?.slug ?? "__none") !== bulkGroup) return false;
         if (u.cc && bulkExcl.includes(u.cc.name)) return false;
         if (skipCC && u.ccb) return false;
         if (skipEnt && u.coverage === "ent") return false;
@@ -228,6 +235,12 @@ function Actions({ params }: { params: ReadonlyURLSearchParams }) {
               {ccOptions.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
             </NativeSelect>
           </Field>
+          <Field label="Só quem está no grupo">
+            <NativeSelect value={bulkGroup} onChange={(e) => setBulkGroup(e.target.value)}>
+              <option value="">qualquer grupo</option>
+              {groupOptions.map((g) => <option key={g.slug} value={g.slug}>{g.name} ({g.n})</option>)}
+            </NativeSelect>
+          </Field>
           <Field label="Excluir cost centers (ctrl+clique para vários)" className="sm:col-span-2">
             <NativeSelect multiple size={5} value={bulkExcl} onChange={(e) => setBulkExcl([...e.target.selectedOptions].map((o) => o.value))} className="h-auto py-1">
               {ccOptions.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -243,7 +256,7 @@ function Actions({ params }: { params: ReadonlyURLSearchParams }) {
           </div>
           {plan && (
             <div className="sm:col-span-2 max-h-44 overflow-auto rounded-md border p-2 flex flex-wrap gap-1">
-              {plan.length ? plan.map((u) => <span key={u.login} title={u.cc?.name ?? "sem cost center"}><CcTag name={u.login} /></span>) : <span className="text-xs text-muted-foreground">ninguém se encaixa nos filtros</span>}
+              {plan.length ? plan.map((u) => <span key={u.login} title={`${u.cc?.name ?? "sem cost center"} · ${u.seat.assigning_team?.name ?? "sem grupo"}`}><CcTag name={u.login} /></span>) : <span className="text-xs text-muted-foreground">ninguém se encaixa nos filtros</span>}
             </div>
           )}
         </CardContent>

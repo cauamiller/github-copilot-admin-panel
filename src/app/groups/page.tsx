@@ -17,6 +17,8 @@ import type { UserRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const SEAT_PRICE = 19;
+const CREDITS_PER_SEAT = 1900; // franquia mensal inclusa no seat
+const CREDIT_PRICE = 0.01;
 const NO_TEAM = "__none";
 
 interface Group {
@@ -34,6 +36,8 @@ interface Group {
   credits: number;          // US$ consumidos em AI credits (ciclo atual)
   creditsKnown: number;     // usuários com consumo rastreável
   over: number;             // usuários no teto
+  included: number;         // créditos inclusos (seats × 1.900)
+  overage: number;          // US$ acima da franquia
   byCC: { name: string; id: string | null; n: number; credits: number }[];
 }
 
@@ -78,6 +82,8 @@ function buildGroups(users: UserRow[]): Group[] {
         credits: list.reduce((a, u) => a + (u.consumed ?? 0), 0),
         creditsKnown: list.filter((u) => u.consumed != null).length,
         over: list.filter((u) => (u.pct ?? 0) >= 100).length,
+        included: list.length * CREDITS_PER_SEAT,
+        overage: Math.max(0, list.reduce((a, u) => a + (u.consumed ?? 0), 0) - list.length * CREDITS_PER_SEAT * CREDIT_PRICE),
         byCC: [...cc.values()].sort((a, b) => b.credits - a.credits || b.n - a.n),
       };
     })
@@ -99,8 +105,8 @@ function Groups() {
   const [open, setOpen] = useState<Group | null>(null);
   const now = new Date();
   const monthLabel = `${MONTHS[now.getMonth()]}/${now.getFullYear()}`;
-  const total = groups.reduce((a, g) => ({ seats: a.seats + g.seats, lic: a.lic + g.licenseFull, licTD: a.licTD + g.licenseToDate, cr: a.cr + g.credits }), { seats: 0, lic: 0, licTD: 0, cr: 0 });
-  const totalCost = (g: Group) => g.licenseFull + g.credits;
+  const total = groups.reduce((a, g) => ({ seats: a.seats + g.seats, lic: a.lic + g.licenseFull, licTD: a.licTD + g.licenseToDate, cr: a.cr + g.credits, ov: a.ov + g.overage, inc: a.inc + g.included }), { seats: 0, lic: 0, licTD: 0, cr: 0, ov: 0, inc: 0 });
+  const totalCost = (g: Group) => g.licenseFull + g.overage; // licenças já incluem a franquia de créditos
   const PALETTE = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-violet-500", "bg-rose-500", "bg-cyan-500"];
   const colorOf = (i: number) => PALETTE[i % PALETTE.length];
 
@@ -111,16 +117,17 @@ function Groups() {
     { id: "never", header: "Nunca usaram", align: "right", sortValue: (g) => g.never, cell: (g) => (g.never ? <Chip tone={g.never / g.seats > 0.3 ? "warn" : "neutral"}>{nf(g.never)} ({Math.round((g.never / g.seats) * 100)}%)</Chip> : "0") },
     { id: "lic", header: "Licenças (cheio)", align: "right", sortValue: (g) => g.licenseFull, cell: (g) => money(g.licenseFull) },
     { id: "licTD", header: "Até hoje", align: "right", sortValue: (g) => g.licenseToDate, cell: (g) => <span className="text-muted-foreground">{money(g.licenseToDate)}</span> },
-    { id: "credits", header: "AI credits", align: "right", sortValue: (g) => g.credits, cell: (g) => <span className="inline-flex items-center gap-2">{money(g.credits)}{g.over > 0 && <Chip tone="crit">{g.over} no teto</Chip>}</span> },
+    { id: "credits", header: "AI credits", align: "right", sortValue: (g) => g.credits, cell: (g) => <span className="inline-flex items-center gap-2">{money(g.credits)}<span className="text-muted-foreground text-xs">{Math.round((g.credits / (g.included * CREDIT_PRICE)) * 100)}% da franquia</span>{g.over > 0 && <Chip tone="crit">{g.over} no teto</Chip>}</span> },
+    { id: "overage", header: "Excedente", align: "right", sortValue: (g) => g.overage, cell: (g) => (g.overage > 0 ? <Chip tone="serious">{money(g.overage)}</Chip> : <span className="text-muted-foreground">–</span>) },
     { id: "avg", header: "Por ativo", align: "right", sortValue: (g) => (g.active30 ? g.credits / g.active30 : 0), cell: (g) => <span className="text-muted-foreground">{money(g.active30 ? g.credits / g.active30 : 0)}</span> },
     { id: "total", header: "Custo mês", align: "right", sortValue: totalCost, cell: (g) => <b>{money(totalCost(g))}</b> },
-    { id: "share", header: "%", align: "right", sortValue: totalCost, cell: (g) => `${((totalCost(g) / (total.lic + total.cr)) * 100).toFixed(1)}%` },
+    { id: "share", header: "%", align: "right", sortValue: totalCost, cell: (g) => `${((totalCost(g) / (total.lic + total.ov)) * 100).toFixed(1)}%` },
   ];
 
   const csvGroups = () => toCSV(groups, [
     { h: "mes", v: () => monthLabel }, { h: "grupo", v: (g) => g.name }, { h: "slug", v: (g) => (g.key === NO_TEAM ? "" : g.key) }, { h: "seats", v: (g) => g.seats },
     { h: "ativos_7d", v: (g) => g.active7 }, { h: "ativos_30d", v: (g) => g.active30 }, { h: "nunca_usaram", v: (g) => g.never }, { h: "adicionados_no_mes", v: (g) => g.addedThisMonth }, { h: "cancelamento_pendente", v: (g) => g.pending },
-    { h: "licencas_mes_cheio_usd", v: (g) => g.licenseFull.toFixed(2) }, { h: "licencas_ate_hoje_usd", v: (g) => g.licenseToDate.toFixed(2) }, { h: "ai_credits_usd", v: (g) => g.credits.toFixed(2) }, { h: "custo_mes_usd", v: (g) => totalCost(g).toFixed(2) },
+    { h: "licencas_mes_cheio_usd", v: (g) => g.licenseFull.toFixed(2) }, { h: "licencas_ate_hoje_usd", v: (g) => g.licenseToDate.toFixed(2) }, { h: "ai_credits_usd", v: (g) => g.credits.toFixed(2) }, { h: "franquia_creditos", v: (g) => g.included }, { h: "excedente_usd", v: (g) => g.overage.toFixed(2) }, { h: "custo_mes_usd", v: (g) => totalCost(g).toFixed(2) },
   ]);
   const csvUsers = () => toCSV(groups.flatMap((g) => g.users.map((u) => ({ g, u }))), [
     { h: "mes", v: () => monthLabel }, { h: "grupo", v: (x) => x.g.name }, { h: "login", v: (x) => x.u.login }, { h: "cost_center", v: (x) => x.u.cc?.name ?? "" },
@@ -132,17 +139,17 @@ function Groups() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi label={`Custo total (${monthLabel})`} value={money(total.lic + total.cr)} foot={`${money(total.lic)} licenças · ${money(total.cr)} AI credits`} />
+        <Kpi label={`Custo total (${monthLabel})`} value={money(total.lic + total.ov)} foot={`${money(total.lic)} licenças · ${money(total.ov)} excedente de créditos`} />
         <Kpi label="Grupos" value={nf(groups.length)} foot={`${nf(total.seats)} seats`} />
         <Kpi label="Licenças até hoje" value={money(total.licTD)} foot={`rateio por dia · ${now.getDate()}/${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()} do mês`} />
-        <Kpi label="AI credits por seat" value={money(total.seats ? total.cr / total.seats : 0)} foot="média do ciclo atual" />
+        <Kpi label="Uso da franquia de créditos" value={`${total.inc ? Math.round((total.cr / (total.inc * CREDIT_PRICE)) * 100) : 0}%`} foot={`${money(total.cr)} de ${money(total.inc * CREDIT_PRICE)} inclusos (${nf(total.inc)} créditos)`} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="gap-0 py-0">
-          <SectionTitle sub="licenças (mês cheio) + AI credits">Custo por grupo</SectionTitle>
+          <SectionTitle sub="licenças (mês cheio) + excedente de créditos">Custo por grupo</SectionTitle>
           <CardContent className="px-4 py-4">
-            <StackBar total={total.lic + total.cr} parts={groups.map((g, i) => ({ label: g.name, v: Math.round(totalCost(g)), color: colorOf(i) }))} />
+            <StackBar total={total.lic + total.ov} parts={groups.map((g, i) => ({ label: g.name, v: Math.round(totalCost(g)), color: colorOf(i) }))} />
             <div className="mt-4">
               <HBars rows={groups.map((g, i) => ({ name: g.name, key: g.key, v: totalCost(g), color: colorOf(i) }))} onClick={(k) => setOpen(groups.find((g) => g.key === k) ?? null)} />
             </div>
@@ -169,7 +176,7 @@ function Groups() {
         }>Detalhe por grupo</SectionTitle>
         <DataTable rows={groups} columns={columns} rowKey={(g) => g.key} defaultSort={{ id: "total", dir: -1 }} onRowClick={setOpen} footer={(n) => `${n} grupos · clique para ver usuários e cost centers`} />
         <div className="border-t px-4 py-2.5 text-xs text-muted-foreground leading-relaxed">
-          Grupo = enterprise team que atribuiu o seat (vem do IdP: <span className="font-mono">github-copilot-users</span>, <span className="font-mono">github-copilot-hackaemb</span>). Licença a {usd0(SEAT_PRICE)}/seat/mês: <b>mês cheio</b> = seats atuais × {usd0(SEAT_PRICE)}; <b>até hoje</b> = rateado pelos dias em que cada seat existiu neste mês. AI credits = consumo do ciclo atual via budgets (a preço de lista); seats sem budget rastreável entram como zero.
+          Grupo = enterprise team que atribuiu o seat (vem do IdP: <span className="font-mono">github-copilot-users</span>, <span className="font-mono">github-copilot-hackaemb</span>). Licença a {usd0(SEAT_PRICE)}/seat/mês e inclui {nf(CREDITS_PER_SEAT)} AI credits: <b>mês cheio</b> = seats atuais × {usd0(SEAT_PRICE)}; <b>até hoje</b> = rateado pelos dias em que cada seat existiu no mês. <b>Excedente</b> = créditos consumidos acima da franquia do grupo (seats × {nf(CREDITS_PER_SEAT)}), a US$ 0,01. Custo do mês = licenças + excedente. Consumo via budgets (ciclo atual); seats sem budget rastreável entram como zero.
         </div>
       </Card>
 
@@ -194,7 +201,8 @@ function GroupDetail({ g, colorClass }: { g: Group; colorClass: string }) {
         <div className="mt-1 flex flex-wrap gap-1.5">
           <Chip tone="accent">{nf(g.seats)} seats</Chip>
           <Chip>licenças {money(g.licenseFull)}</Chip>
-          <Chip>AI credits {money(g.credits)}</Chip>
+          <Chip>AI credits {money(g.credits)} · {Math.round((g.credits / (g.included * CREDIT_PRICE)) * 100)}% da franquia</Chip>
+          {g.overage > 0 && <Chip tone="serious">excedente {money(g.overage)}</Chip>}
           <Chip tone={g.never / g.seats > 0.3 ? "warn" : "neutral"}>{nf(g.never)} nunca usaram</Chip>
           {g.over > 0 && <Chip tone="crit">{g.over} no teto</Chip>}
         </div>

@@ -16,8 +16,15 @@ import { downloadText, lastMonths, money, monthLabel, nf, toCSV } from "@/lib/fo
 import type { BillingRow, UserRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type Basis = "gross" | "net";
-const chargeOf = (r: BillingRow, basis: Basis) => (basis === "gross" ? r.gross : r.net);
+type Basis = "overage" | "gross" | "net";
+const CREDITS_PER_SEAT = 1900; // franquia mensal de AI credits inclusa em cada seat (US$ 19)
+const CREDIT_PRICE = 0.01;
+/** créditos inclusos no período = user-months faturados × 1.900 (acompanha o rateio da licença) */
+const includedOf = (r: BillingRow) => r.userMonths * CREDITS_PER_SEAT;
+const overageOf = (r: BillingRow) => Math.max(0, r.credits - includedOf(r)) * CREDIT_PRICE;
+const licenseOf = (r: BillingRow) => r.lines.filter((l) => l.unitType === "UserMonths").reduce((a, l) => a + l.gross, 0);
+const chargeOf = (r: BillingRow, basis: Basis) => (basis === "overage" ? licenseOf(r) + overageOf(r) : basis === "gross" ? r.gross : r.net);
+const BASIS_LABEL: Record<Basis, string> = { overage: "Licenças + excedente", gross: "Valor bruto", net: "Líquido (fatura)" };
 const SKU_LABEL: Record<string, string> = {
   "Copilot Business": "Licenças Copilot Business",
   "Copilot AI Credits": "AI credits",
@@ -39,7 +46,7 @@ function Billing() {
   const d = s.d!;
   const months = useMemo(() => lastMonths(12), []);
   const [sel, setSel] = useState(months[0].key);
-  const [basis, setBasis] = useState<Basis>("gross");
+  const [basis, setBasis] = useState<Basis>("overage");
   const [hideZero, setHideZero] = useState(true);
   const [detail, setDetail] = useState<BillingRow | null>(null);
   const cur = months.find((m) => m.key === sel)!;
@@ -52,10 +59,11 @@ function Billing() {
   }, [report, hideZero]);
 
   const totals = useMemo(() => {
-    const t = { charge: 0, gross: 0, net: 0, discount: 0, userMonths: 0, credits: 0, ccWithUse: 0, outside: 0 };
+    const t = { charge: 0, gross: 0, net: 0, discount: 0, userMonths: 0, credits: 0, ccWithUse: 0, outside: 0, included: 0, overage: 0 };
     for (const r of report?.rows ?? []) {
       t.gross += r.gross; t.net += r.net; t.discount += r.discount; t.userMonths += r.userMonths; t.credits += r.credits;
       t.charge += chargeOf(r, basis);
+      t.included += includedOf(r); t.overage += overageOf(r);
       if (r.ccId && r.gross > 0) t.ccWithUse++;
       if (!r.ccId) t.outside = chargeOf(r, basis);
     }
@@ -73,9 +81,10 @@ function Billing() {
     { id: "members", header: "Membros", align: "right", sortValue: (r) => r.members, cell: (r) => (r.ccId ? nf(r.members) : "–") },
     { id: "um", header: "User-months", align: "right", sortValue: (r) => r.userMonths, cell: (r) => <span className="text-muted-foreground">{nf2.format(r.userMonths)}</span> },
     { id: "credits", header: "AI credits", align: "right", sortValue: (r) => r.credits, cell: (r) => <span className="text-muted-foreground">{nf(r.credits)}</span> },
-    { id: "gross", header: "Bruto", align: "right", sortValue: (r) => r.gross, cell: (r) => money(r.gross) },
-    { id: "discount", header: "Descontos", align: "right", sortValue: (r) => r.discount, cell: (r) => <span className="text-muted-foreground">{r.discount ? `− ${money(r.discount)}` : "–"}</span> },
-    { id: "net", header: "Líquido", align: "right", sortValue: (r) => r.net, cell: (r) => money(r.net) },
+    { id: "included", header: "Franquia", align: "right", sortValue: includedOf, cell: (r) => <span className="text-muted-foreground" title="user-months × 1.900 créditos">{nf(includedOf(r))}</span> },
+    { id: "overage", header: "Excedente", align: "right", sortValue: overageOf, cell: (r) => { const o = overageOf(r); return o > 0 ? <Chip tone="serious">{money(o)}</Chip> : <span className="text-muted-foreground">{r.credits > 0 ? `${Math.round((r.credits / Math.max(1, includedOf(r))) * 100)}% da franquia` : "–"}</span>; } },
+    { id: "gross", header: "Bruto", align: "right", sortValue: (r) => r.gross, cell: (r) => <span className="text-muted-foreground">{money(r.gross)}</span> },
+    { id: "net", header: "Líquido", align: "right", sortValue: (r) => r.net, cell: (r) => <span className="text-muted-foreground">{money(r.net)}</span> },
     { id: "charge", header: "A cobrar", align: "right", sortValue: (r) => chargeOf(r, basis), cell: (r) => <b className={cn(chargeOf(r, basis) > 0 && "text-foreground")}>{money(chargeOf(r, basis))}</b> },
     { id: "share", header: "% do total", align: "right", sortValue: (r) => chargeOf(r, basis), cell: (r) => (totals.charge ? `${((chargeOf(r, basis) / totals.charge) * 100).toFixed(1)}%` : "–") },
   ];
@@ -83,8 +92,8 @@ function Billing() {
   const csvSummary = () => toCSV(rows, [
     { h: "mes", v: () => sel }, { h: "cost_center", v: (r) => r.name }, { h: "estado", v: (r) => r.state }, { h: "membros", v: (r) => (r.ccId ? r.members : "") },
     { h: "licencas_user_months", v: (r) => r.userMonths.toFixed(4) }, { h: "ai_credits", v: (r) => r.credits.toFixed(2) }, { h: "premium_requests", v: (r) => r.premiumRequests.toFixed(2) },
-    { h: "bruto_usd", v: (r) => r.gross.toFixed(2) }, { h: "desconto_usd", v: (r) => r.discount.toFixed(2) }, { h: "liquido_usd", v: (r) => r.net.toFixed(2) },
-    { h: `a_cobrar_usd_${basis === "gross" ? "bruto" : "liquido"}`, v: (r) => chargeOf(r, basis).toFixed(2) }, { h: "erro", v: (r) => r.error ?? "" },
+    { h: "creditos_inclusos", v: (r) => includedOf(r).toFixed(0) }, { h: "excedente_usd", v: (r) => overageOf(r).toFixed(2) }, { h: "licencas_usd", v: (r) => licenseOf(r).toFixed(2) }, { h: "bruto_usd", v: (r) => r.gross.toFixed(2) }, { h: "desconto_usd", v: (r) => r.discount.toFixed(2) }, { h: "liquido_usd", v: (r) => r.net.toFixed(2) },
+    { h: `a_cobrar_usd_${basis}`, v: (r) => chargeOf(r, basis).toFixed(2) }, { h: "erro", v: (r) => r.error ?? "" },
   ]);
   const csvDetail = () => {
     const flat = rows.flatMap((r) => r.lines.map((l) => ({ r, l })));
@@ -114,9 +123,9 @@ function Billing() {
             <RefreshCw className={cn(s.progress && "animate-spin")} /> {report ? "Atualizar" : "Gerar relatório"}
           </Button>
           <div className="ml-1 inline-flex rounded-lg border p-0.5 text-xs">
-            {(["gross", "net"] as Basis[]).map((b) => (
+            {(["overage", "gross", "net"] as Basis[]).map((b) => (
               <button key={b} type="button" onClick={() => setBasis(b)} className={cn("rounded-md px-2.5 py-1", basis === b ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
-                {b === "gross" ? "Cobrar valor bruto" : "Cobrar valor líquido"}
+                {BASIS_LABEL[b]}
               </button>
             ))}
           </div>
@@ -131,7 +140,7 @@ function Billing() {
           )}
         </div>
         <div className="border-t px-4 py-2.5 text-xs text-muted-foreground leading-relaxed">
-          Fonte: relatório de uso do GitHub (<span className="font-mono">/settings/billing/usage</span>) filtrado por cost center. <b>Bruto</b> = licenças (US$ 19/user-month, rateadas por dia) + AI credits (US$ 0,01/crédito) a preço de lista; <b>líquido</b> = o que o GitHub fatura após descontos — no plano atual os AI credits têm 100% de desconto, então o líquido reflete só licenças. Para cobrar <i>pelo consumo</i>, use o bruto.
+          Fonte: relatório de uso do GitHub (<span className="font-mono">/settings/billing/usage</span>) filtrado por cost center. Cada seat custa US$ 19/mês (rateado por dia) e inclui <b>1.900 AI credits</b>; o que passa da franquia é cobrado a US$ 0,01/crédito. <b>Licenças + excedente</b> = licenças do cost center + créditos acima da franquia própria (user-months × 1.900). <b>Bruto</b> = tudo a preço de lista; <b>líquido</b> = fatura do GitHub (a franquia é abatida no nível da enterprise, então o excedente só aparece aqui quando a enterprise inteira ultrapassa a soma das franquias).
           {isCurrentMonth && " Mês em andamento: valores parciais até hoje."}
         </div>
       </Card>
@@ -140,10 +149,11 @@ function Billing() {
         <Card className="gap-0 py-0"><Empty>Escolha o mês e clique em “Gerar relatório” — são {s.cc.length + 1} consultas à API ({s.cc.length} cost centers + uso fora de cost center).</Empty></Card>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-            <Kpi label={`Total a cobrar (${monthLabel(cur.year, cur.month)})`} value={money(totals.charge)} foot={basis === "gross" ? "valor bruto" : "valor líquido"} />
-            <Kpi label="Licenças" value={money(totals.userMonths * 19)} foot={`${nf2.format(totals.userMonths)} user-months`} />
-            <Kpi label="AI credits (bruto)" value={money(totals.credits * 0.01)} foot={`${nf(totals.credits)} créditos`} />
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <Kpi label={`Total a cobrar (${monthLabel(cur.year, cur.month)})`} value={money(totals.charge)} foot={BASIS_LABEL[basis].toLowerCase()} />
+            <Kpi label="Licenças" value={money(totals.userMonths * 19)} foot={`${nf2.format(totals.userMonths)} user-months · franquia ${nf(totals.included)} créditos`} />
+            <Kpi label="AI credits consumidos" value={nf(totals.credits)} foot={`${money(totals.credits * 0.01)} a preço de lista · ${totals.included ? Math.round((totals.credits / totals.included) * 100) : 0}% da franquia`} />
+            <Kpi label="Excedente (soma por CC)" value={money(totals.overage)} foot="créditos acima da franquia de cada cost center" />
             <Kpi label="Cost centers com uso" value={nf(totals.ccWithUse)} foot={`de ${s.cc.length} cadastrados`} />
             <Kpi label="Fora de cost center" value={money(totals.outside)} foot="faturado direto na enterprise" />
           </div>
@@ -172,6 +182,8 @@ function Billing() {
                 <SheetDescription>{monthLabel(cur.year, cur.month)} · {detail.ccId ? `${detail.members} membros` : "uso não atribuído a cost center"}</SheetDescription>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   <Chip tone="accent">a cobrar {money(chargeOf(detail, basis))}</Chip>
+                  <Chip>franquia {nf(includedOf(detail))} cr</Chip>
+                  <Chip tone={overageOf(detail) > 0 ? "serious" : "neutral"}>excedente {money(overageOf(detail))}</Chip>
                   <Chip>bruto {money(detail.gross)}</Chip>
                   <Chip>líquido {money(detail.net)}</Chip>
                 </div>

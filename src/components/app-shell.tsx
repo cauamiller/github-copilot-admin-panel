@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "next-themes";
-import { Activity, BellRing, Building2, History, LayoutDashboard, Moon, Receipt, RefreshCw, Settings, Sun, Users, Wallet, Wand2 } from "lucide-react";
+import { Activity, BellRing, Building2, History, LayoutDashboard, Moon, Receipt, RefreshCw, Settings, Sun, Users, UsersRound, Wallet, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
@@ -19,13 +19,14 @@ const NAV = [
   { href: "/budgets", label: "Budgets", icon: Wallet, count: "budgets" },
   { href: "/consumption", label: "Consumo", icon: Activity },
   { href: "/billing", label: "Cobrança", icon: Receipt },
+  { href: "/groups", label: "Grupos", icon: UsersRound },
   { href: "/alerts", label: "Alertas", icon: BellRing, count: "alerts" },
   { href: "/actions", label: "Ações", icon: Wand2 },
   { href: "/log", label: "Histórico", icon: History, count: "log" },
 ] as const;
 
 const TITLES: Record<string, string> = {
-  "/": "Visão geral", "/users": "Usuários", "/cost-centers": "Cost centers", "/budgets": "Budgets", "/consumption": "Consumo", "/billing": "Cobrança",
+  "/": "Visão geral", "/users": "Usuários", "/cost-centers": "Cost centers", "/budgets": "Budgets", "/consumption": "Consumo", "/billing": "Cobrança", "/groups": "Grupos",
   "/alerts": "Alertas", "/actions": "Ações", "/log": "Histórico", "/settings": "Configurações",
 };
 

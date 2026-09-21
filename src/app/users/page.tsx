@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Copy } from "lucide-react";
+import { Copy, Download } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,10 @@ import { Gate } from "@/components/gate";
 import { DataTable, NativeSelect, type Column } from "@/components/data-table";
 import { ActivityChip, CcTag, Chip, CoverageChip, Login, Meter } from "@/components/bits";
 import { useStore } from "@/lib/store";
-import { toCSV } from "@/lib/format";
+import { downloadText, toCSV } from "@/lib/format";
 import type { UserRow } from "@/lib/types";
+
+const COVERAGE_LABEL: Record<UserRow["coverage"], string> = { user: "usuário", cc: "cost center", ent: "enterprise", none: "nenhum" };
 
 export default function UsersPage() {
   return (
@@ -53,15 +55,17 @@ function Users() {
     { id: "team", header: "Time de origem", sortValue: (u) => u.team, className: "text-muted-foreground", cell: (u) => u.team },
   ];
 
+  const reportCSV = () => toCSV(rows, [
+    { h: "login", v: (r) => r.login }, { h: "cost_center", v: (r) => r.cc?.name ?? "" },
+    { h: "budget_definido", v: (r) => r.target ?? "" }, { h: "origem_budget", v: (r) => COVERAGE_LABEL[r.coverage] },
+    { h: "budget_usuario", v: (r) => r.ub?.budget_amount ?? "" }, { h: "budget_cost_center", v: (r) => r.ccb?.budget_amount ?? "" },
+    { h: "consumo", v: (r) => (r.consumed == null ? "" : r.consumed.toFixed(2)) }, { h: "ultima_atividade", v: (r) => r.lastActivity ?? "" },
+    { h: "editor", v: (r) => r.editor }, { h: "time", v: (r) => r.team }, { h: "cancelamento_pendente", v: (r) => (r.pending ? "sim" : "") },
+  ]);
   const copy = () => {
-    const csv = toCSV(rows, [
-      { h: "login", v: (r) => r.login }, { h: "cost_center", v: (r) => r.cc?.name ?? "" }, { h: "cobertura", v: (r) => r.coverage },
-      { h: "budget_usuario", v: (r) => r.ub?.budget_amount ?? "" }, { h: "budget_cost_center", v: (r) => r.ccb?.budget_amount ?? "" },
-      { h: "consumo", v: (r) => (r.consumed == null ? "" : r.consumed.toFixed(2)) }, { h: "ultima_atividade", v: (r) => r.lastActivity ?? "" },
-      { h: "editor", v: (r) => r.editor }, { h: "time", v: (r) => r.team }, { h: "cancelamento_pendente", v: (r) => (r.pending ? "sim" : "") },
-    ]);
-    navigator.clipboard.writeText(csv).then(() => toast.success(`CSV com ${rows.length} linhas copiado`)).catch(() => toast.error("Não foi possível copiar"));
+    navigator.clipboard.writeText(reportCSV()).then(() => toast.success(`CSV com ${rows.length} linhas copiado`)).catch(() => toast.error("Não foi possível copiar"));
   };
+  const download = () => downloadText(`usuarios-budgets-${new Date().toISOString().slice(0, 10)}.csv`, reportCSV());
 
   return (
     <Card className="gap-0 py-0">
@@ -86,7 +90,10 @@ function Users() {
           <option value="stale">Parados há +30 dias</option>
           <option value="never">Nunca usaram</option>
         </NativeSelect>
-        <Button size="sm" variant="outline" onClick={copy} className="ml-auto"><Copy /> Copiar CSV</Button>
+        <div className="ml-auto flex gap-1.5">
+          <Button size="sm" variant="outline" onClick={download}><Download /> Baixar CSV</Button>
+          <Button size="sm" variant="ghost" onClick={copy}><Copy /> Copiar</Button>
+        </div>
       </div>
       <DataTable rows={rows} columns={columns} rowKey={(u) => u.login} defaultSort={{ id: "consumed", dir: -1 }} onRowClick={(u) => s.showUser(u.login)} footer={(n, t) => `${n} de ${t} usuários`} empty="Nenhum usuário com esses filtros." />
     </Card>

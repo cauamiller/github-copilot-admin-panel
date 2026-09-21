@@ -6,10 +6,12 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Gate } from "@/components/gate";
 import { DataTable, NativeSelect, type Column } from "@/components/data-table";
 import { CcTag, Chip, Login, Meter } from "@/components/bits";
 import { useBudgetDialogs } from "@/components/budget-dialogs";
+import { useConfirm } from "@/components/confirm";
 import { useStore } from "@/lib/store";
 import { pct, scopeLabel, usd0 } from "@/lib/format";
 import type { Budget } from "@/lib/types";
@@ -25,10 +27,13 @@ export default function BudgetsPage() {
 function Budgets() {
   const s = useStore();
   const bd = useBudgetDialogs();
+  const confirm = useConfirm();
   const [q, setQ] = useState("");
   const [scope, setScope] = useState("");
   const [level, setLevel] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const scopes = useMemo(() => [...new Set(s.budgets.map((b) => b.budget_scope))].sort(), [s.budgets]);
+  const groupOf = (b: Budget) => (b.user ? s.d?.usersByLogin[b.user.toLowerCase()]?.team || "" : "");
 
   const rows = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -43,8 +48,37 @@ function Budgets() {
     });
   }, [s.budgets, q, scope, level]);
 
+  const allSelected = rows.length > 0 && rows.every((b) => selected.has(b.id));
+  const someSelected = !allSelected && rows.some((b) => selected.has(b.id));
+  const toggleAll = () => setSelected((sel) => {
+    const next = new Set(sel);
+    if (allSelected) rows.forEach((b) => next.delete(b.id));
+    else rows.forEach((b) => next.add(b.id));
+    return next;
+  });
+  const toggleOne = (id: string) => setSelected((sel) => {
+    const next = new Set(sel);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  const bulkDelete = () => {
+    const ids = [...selected];
+    confirm({
+      title: `Excluir ${ids.length} budget${ids.length > 1 ? "s" : ""}`,
+      danger: true,
+      confirmLabel: "Excluir",
+      body: <p>Excluir os <b>{ids.length}</b> budgets selecionados? Essa ação não pode ser desfeita.</p>,
+      onConfirm: async () => { await s.deleteBudgets(ids); setSelected(new Set()); },
+    });
+  };
+
   const columns: Column<Budget>[] = [
+    { id: "sel", header: <Checkbox checked={allSelected} indeterminate={someSelected} onCheckedChange={toggleAll} aria-label="Selecionar todos" />, cell: (b) => (
+      <span onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(b.id)} onCheckedChange={() => toggleOne(b.id)} aria-label="Selecionar" /></span>
+    ) },
     { id: "entity", header: "Entidade", sortValue: (b) => b.user ?? b.budget_entity_name ?? "", cell: (b) => (b.user ? <Login login={b.user} onClick={() => s.showUser(b.user!)} /> : <CcTag name={b.budget_entity_name || "(enterprise)"} />) },
+    { id: "group", header: "Grupo", sortValue: (b) => groupOf(b), cell: (b) => { const g = groupOf(b); return g ? <Chip>{g}</Chip> : <span className="text-muted-foreground">–</span>; } },
     { id: "scope", header: "Escopo", sortValue: (b) => b.budget_scope, cell: (b) => <Chip>{scopeLabel(b.budget_scope)}</Chip> },
     { id: "amount", header: "Valor", align: "right", sortValue: (b) => b.budget_amount, cell: (b) => usd0(b.budget_amount) },
     { id: "consumed", header: "Consumo", sortValue: (b) => b.consumed_amount, cell: (b) => {
@@ -75,7 +109,12 @@ function Budgets() {
         <NativeSelect value={level} onChange={(e) => setLevel(e.target.value)}>
           <option value="">Todo consumo</option><option value="75">≥ 75%</option><option value="90">≥ 90%</option><option value="100">Estourado</option><option value="0">Sem consumo</option>
         </NativeSelect>
-        <Button size="sm" className="ml-auto" render={<Link href="/actions" />} nativeButton={false} >Novo budget</Button>
+        <div className="ml-auto flex items-center gap-2">
+          {selected.size > 0 && (
+            <Button size="sm" variant="destructive" onClick={bulkDelete}><Trash2 /> Excluir {selected.size} selecionado{selected.size > 1 ? "s" : ""}</Button>
+          )}
+          <Button size="sm" render={<Link href="/actions" />} nativeButton={false} >Novo budget</Button>
+        </div>
       </div>
       <DataTable rows={rows} columns={columns} rowKey={(b) => b.id} defaultSort={{ id: "consumed", dir: -1 }} footer={(n, t) => `${n} de ${t} budgets`} empty="Nenhum budget com esses filtros." />
     </Card>

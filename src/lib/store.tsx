@@ -76,6 +76,7 @@ interface Store {
   createBudget: (input: BudgetInput) => Promise<void>;
   editBudget: (id: string, body: { budget_amount: number; prevent_further_usage: boolean; expires_at?: string }) => Promise<void>;
   deleteBudget: (id: string) => Promise<void>;
+  deleteBudgets: (ids: string[]) => Promise<void>;
   createCostCenters: (names: string[], pool: boolean) => Promise<void>;
   deleteCostCenter: (id: string) => Promise<void>;
   moveUsers: (ccId: string, logins: string[], remove: boolean) => Promise<void>;
@@ -286,6 +287,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }, reloadBudgets);
   }, [bp, budgets, runAction, reloadBudgets]);
 
+  const deleteBudgets = useCallback(async (ids: string[]) => {
+    let ok = 0;
+    const fails: string[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const b = budgets.find((x) => x.id === ids[i]);
+      const who = b?.user ?? b?.budget_entity_name ?? ids[i];
+      setProgress({ label: `Excluindo budgets (${i + 1}/${ids.length}) — ${who}`, value: (i + 1) / ids.length });
+      try {
+        await gh(`${bp}/budgets/${ids[i]}`, { method: "DELETE" });
+        ok++;
+      } catch (e) {
+        fails.push(`${who}: ${(e as ApiError).body?.message || (e as Error).message}`);
+      }
+    }
+    setProgress(null);
+    logAdd("Excluir budgets em lote", fails.length ? "err" : "ok", `${ok} excluídos, ${fails.length} falhas${fails.length ? " — " + fails.slice(0, 8).join("; ") : ""}`);
+    (fails.length ? toast.error : toast.success)(`${ok} budgets excluídos${fails.length ? `, ${fails.length} falhas (veja o histórico)` : ""}`);
+    await reloadBudgets();
+  }, [bp, budgets, logAdd, reloadBudgets]);
+
   const createCostCenters = useCallback(async (names: string[], pool: boolean) => {
     if (names.length === 1) {
       await runAction(`Criar cost center ${names[0]}`, async () => {
@@ -356,7 +377,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     config, configError, ent, me, cc, budgets, seats, usage, userStates, ccUsage, d, loadedAt, loading, progress, rate, error, log,
     clearLog: () => setLog([]),
     loadAll, reloadBudgets, reloadCC, loadCCUsage, billing, loadBilling, runAction,
-    createBudget, editBudget, deleteBudget, createCostCenters, deleteCostCenter, moveUsers, bulkCreateUserBudgets,
+    createBudget, editBudget, deleteBudget, deleteBudgets, createCostCenters, deleteCostCenter, moveUsers, bulkCreateUserBudgets,
     openUser, openCC, showUser: setOpenUser, showCC: setOpenCC,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

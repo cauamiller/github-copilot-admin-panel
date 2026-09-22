@@ -6,7 +6,7 @@ import { derive } from "./derive";
 import { ApiError, billing as billingPath, gh, mapLimit, onRate, pageAll } from "./gh-client";
 import { usd0 } from "./format";
 import type { BillingLine, BillingReport, BillingRow, Budget, BudgetScope, CCUsage, CostCenter, Derived, LogEntry, RateInfo, Seat, UsageItem, UserState } from "./types";
-import { monthKey } from "./format";
+import { monthKey, monthsBetween } from "./format";
 
 export interface Config {
   enterprise: string;
@@ -58,6 +58,8 @@ interface Store {
   usage: UsageItem[];
   userStates: Record<string, UserState[]>;
   ccUsage: Record<string, CCUsage> | null;
+  usageRange: Record<string, CCUsage> | null;
+  usageRangeSpan: { from: string; to: string } | null;
   d: Derived | null;
   loadedAt: number | null;
   loading: boolean;
@@ -70,6 +72,7 @@ interface Store {
   reloadBudgets: () => Promise<void>;
   reloadCC: () => Promise<void>;
   loadCCUsage: () => Promise<void>;
+  loadUsageRange: (from: string, to: string, ccIds: string[]) => Promise<void>;
   billing: Record<string, BillingReport>;
   loadBilling: (year: number, month: number, force?: boolean) => Promise<void>;
   runAction: (label: string, fn: () => Promise<string | void>, after?: () => Promise<void>) => Promise<void>;
@@ -100,6 +103,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [usage, setUsage] = useState<UsageItem[]>([]);
   const [userStates, setUserStates] = useState<Record<string, UserState[]>>({});
   const [ccUsage, setCCUsage] = useState<Record<string, CCUsage> | null>(null);
+  const [usageRange, setUsageRange] = useState<Record<string, CCUsage> | null>(null);
+  const [usageRangeSpan, setUsageRangeSpan] = useState<{ from: string; to: string } | null>(null);
   const [billing, setBilling] = useState<Record<string, BillingReport>>({});
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -208,6 +213,33 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setCCUsage(res);
     setProgress(null);
   }, [d, bp]);
+
+  /** Uso diário por cost center dentro de um intervalo de datas (YYYY-MM-DD); 1 chamada por cost center por mês tocado pelo intervalo. */
+  const loadUsageRange = useCallback(async (from: string, to: string, ccIds: string[]) => {
+    if (!from || !to || !ccIds.length) { setUsageRange(null); setUsageRangeSpan(null); return; }
+    const targets = cc.filter((c) => ccIds.includes(c.id));
+    if (!targets.length) { setUsageRange({}); setUsageRangeSpan({ from, to }); return; }
+    const months = monthsBetween(from, to);
+    const res: Record<string, CCUsage> = {};
+    setProgress({ label: `Uso de ${from} a ${to} por cost center (0/${targets.length})…`, value: 0 });
+    await mapLimit(targets, 6, async (c) => {
+      let credits = 0, gross = 0, net = 0, items = 0;
+      for (const mo of months) {
+        const j = await gh<{ usageItems: UsageItem[] }>(`${bp}/usage`, { params: { cost_center_id: c.id, year: mo.year, month: mo.month } });
+        for (const i of j.usageItems ?? []) {
+          if (i.date < from || i.date > to) continue;
+          if (i.unitType === "AICredits") credits += i.quantity;
+          gross += i.grossAmount || 0;
+          net += i.netAmount || 0;
+          items++;
+        }
+      }
+      res[c.id] = { credits, gross, net, items };
+    }, (done, total) => setProgress({ label: `Uso de ${from} a ${to} por cost center (${done}/${total})…`, value: done / total }));
+    setUsageRange(res);
+    setUsageRangeSpan({ from, to });
+    setProgress(null);
+  }, [cc, bp]);
 
   /** Uso faturado no mês por cost center (1 chamada por cost center + 1 para o que ficou fora). */
   const loadBilling = useCallback(async (year: number, month: number, force = false) => {
@@ -374,9 +406,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [bp, logAdd, reloadBudgets]);
 
   const value: Store = {
-    config, configError, ent, me, cc, budgets, seats, usage, userStates, ccUsage, d, loadedAt, loading, progress, rate, error, log,
+    config, configError, ent, me, cc, budgets, seats, usage, userStates, ccUsage, usageRange, usageRangeSpan, d, loadedAt, loading, progress, rate, error, log,
     clearLog: () => setLog([]),
-    loadAll, reloadBudgets, reloadCC, loadCCUsage, billing, loadBilling, runAction,
+    loadAll, reloadBudgets, reloadCC, loadCCUsage, loadUsageRange, billing, loadBilling, runAction,
     createBudget, editBudget, deleteBudget, deleteBudgets, createCostCenters, deleteCostCenter, moveUsers, bulkCreateUserBudgets,
     openUser, openCC, showUser: setOpenUser, showCC: setOpenCC,
   };

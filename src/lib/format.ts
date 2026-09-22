@@ -73,6 +73,19 @@ export function lastMonths(n: number): { year: number; month: number; key: strin
   }
   return out;
 }
+/** meses (ano+mês) tocados por um intervalo de datas ISO (YYYY-MM-DD), do mais antigo ao mais recente */
+export function monthsBetween(fromISO: string, toISO: string): { year: number; month: number; key: string; label: string }[] {
+  const out = [];
+  const from = new Date(fromISO);
+  const to = new Date(toISO);
+  const d = new Date(from.getFullYear(), from.getMonth(), 1);
+  while (d <= to) {
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    out.push({ year: y, month: m, key: monthKey(y, m), label: monthLabel(y, m) });
+    d.setMonth(d.getMonth() + 1);
+  }
+  return out;
+}
 export function downloadText(filename: string, text: string, type = "text/csv;charset=utf-8") {
   const blob = new Blob(["﻿" + text], { type }); // BOM: Excel abre UTF-8 com acentos certos
   const a = document.createElement("a");

@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useStore } from "@/lib/store";
 import { useConfirm, Note } from "@/components/confirm";
 import { useBudgetDialogs } from "@/components/budget-dialogs";
 import { ActivityChip, CcTag, Chip, CoverageChip, Login, Meter } from "@/components/bits";
 import { ago, money, nf, usd0 } from "@/lib/format";
+import type { CCRow, Derived } from "@/lib/types";
 import type { ReactNode } from "react";
 
 function KV({ rows }: { rows: [string, ReactNode][] }) {
@@ -32,6 +35,84 @@ function Block({ title, children, right }: { title: string; children: ReactNode;
       </div>
       <div className="p-3">{children}</div>
     </section>
+  );
+}
+
+function MembersBlock({ r, d }: { r: CCRow; d: Derived }) {
+  const s = useStore();
+  const [editing, setEditing] = useState(false);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+
+  const members = r.members.map((m) => {
+    const u = d.usersByLogin[m.toLowerCase()];
+    const st = r.states?.find((x) => x.user.toLowerCase() === m.toLowerCase());
+    return { m, u, st, consumed: u?.consumed ?? st?.consumed_amount ?? null };
+  }).sort((a, b) => (b.consumed ?? -1) - (a.consumed ?? -1));
+
+  const startEdit = () => {
+    const init: Record<string, string> = {};
+    for (const x of members) init[x.m] = x.u?.ub ? String(x.u.ub.budget_amount) : "";
+    setEdits(init);
+    setEditing(true);
+  };
+  const cancelEdit = () => { setEditing(false); setEdits({}); };
+  const saveEdits = async () => {
+    const changed = members
+      .map((x) => ({ login: x.m, raw: edits[x.m]?.trim() ?? "", cur: x.u?.ub?.budget_amount }))
+      .filter((x) => x.raw !== "" && !Number.isNaN(+x.raw) && +x.raw !== x.cur)
+      .map((x) => ({ login: x.login, amount: +x.raw }));
+    if (!changed.length) { cancelEdit(); return; }
+    await s.bulkSetUserBudgets(changed);
+    cancelEdit();
+  };
+  const changedCount = members.filter((x) => { const raw = edits[x.m]?.trim() ?? ""; return raw !== "" && !Number.isNaN(+raw) && +raw !== x.u?.ub?.budget_amount; }).length;
+
+  return (
+    <Block title="Membros" right={
+      <div className="flex items-center gap-2">
+        {editing ? (
+          <>
+            {changedCount > 0 && <span className="text-xs text-muted-foreground">{changedCount} alterado(s)</span>}
+            <Button size="sm" variant="ghost" onClick={cancelEdit} disabled={!!s.progress}>Cancelar</Button>
+            <Button size="sm" onClick={saveEdits} disabled={!!s.progress || !changedCount}>Salvar</Button>
+          </>
+        ) : (
+          <>
+            <span className="text-xs text-muted-foreground">{r.members.length}</span>
+            {members.length > 0 && <Button size="sm" variant="outline" onClick={startEdit}>Editar budgets em lote</Button>}
+          </>
+        )}
+      </div>
+    }>
+      {editing && <div className="mb-3"><Note>Preencha o valor (US$) por linha e clique em Salvar. Em branco = sem alteração; quem ainda não tem budget de usuário ganha um novo, com bloqueio ativo.</Note></div>}
+      <div className="-m-3 overflow-x-auto">
+        <Table>
+          <TableHeader><TableRow><TableHead>Login</TableHead><TableHead>Consumo</TableHead><TableHead>Cobertura</TableHead><TableHead>Atividade</TableHead><TableHead className="text-right">Budget de usuário</TableHead></TableRow></TableHeader>
+          <TableBody>
+            {members.length === 0 && <TableRow><TableCell colSpan={5} className="py-6 text-center text-muted-foreground">Sem membros.</TableCell></TableRow>}
+            {members.map((x) => (
+              <TableRow key={x.m} className={editing ? undefined : "cursor-pointer"} onClick={editing ? undefined : () => { s.showCC(null); s.showUser(x.m); }}>
+                <TableCell><Login login={x.m} /></TableCell>
+                <TableCell>{x.u ? <Meter consumed={x.u.consumed} target={x.u.target} /> : x.st ? <Meter consumed={x.st.consumed_amount} target={x.st.target_amount} /> : "–"}</TableCell>
+                <TableCell>{x.u ? <CoverageChip u={x.u} /> : <Chip tone="warn">sem seat</Chip>}</TableCell>
+                <TableCell>{x.u ? <ActivityChip u={x.u} /> : "–"}</TableCell>
+                <TableCell className="text-right">
+                  {editing ? (
+                    <Input
+                      type="number" min={0} step={1} placeholder="—"
+                      className="h-7 w-24 text-right"
+                      value={edits[x.m] ?? ""}
+                      onChange={(e) => setEdits((s2) => ({ ...s2, [x.m]: e.target.value }))}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : x.u?.ub ? usd0(x.u.ub.budget_amount) : <span className="text-muted-foreground">–</span>}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Block>
   );
 }
 
@@ -116,14 +197,6 @@ export function CCDrawer() {
   const r = id && s.d ? s.d.ccRows.find((x) => x.cc.id === id) : null;
   const d = s.d;
 
-  const members = r && d
-    ? r.members.map((m) => {
-        const u = d.usersByLogin[m.toLowerCase()];
-        const st = r.states?.find((x) => x.user.toLowerCase() === m.toLowerCase());
-        return { m, u, st, consumed: u?.consumed ?? st?.consumed_amount ?? null };
-      }).sort((a, b) => (b.consumed ?? -1) - (a.consumed ?? -1))
-    : [];
-
   return (
     <Sheet open={!!id} onOpenChange={(o) => !o && s.showCC(null)}>
       <SheetContent className="data-[side=right]:sm:max-w-2xl overflow-y-auto gap-0 p-0">
@@ -148,24 +221,7 @@ export function CCDrawer() {
                   ? [["Faixas", <div key="th" className="flex flex-wrap gap-1">{Object.entries(r.budget.budget_thresholds).sort((a, b) => +a[0] - +b[0]).map(([k, v]) => <Chip key={k} tone={k === "100" ? "crit" : k === "90" ? "serious" : k === "75" ? "warn" : "neutral"}>≥{k}%: {v}</Chip>)}</div>] as [string, ReactNode]]
                   : []),
               ]} />
-              <Block title="Membros" right={<span className="text-xs text-muted-foreground">{r.members.length}</span>}>
-                <div className="-m-3 overflow-x-auto">
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Login</TableHead><TableHead>Consumo</TableHead><TableHead>Cobertura</TableHead><TableHead>Atividade</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {members.length === 0 && <TableRow><TableCell colSpan={4} className="py-6 text-center text-muted-foreground">Sem membros.</TableCell></TableRow>}
-                      {members.map((x) => (
-                        <TableRow key={x.m} className="cursor-pointer" onClick={() => { s.showCC(null); s.showUser(x.m); }}>
-                          <TableCell><Login login={x.m} /></TableCell>
-                          <TableCell>{x.u ? <Meter consumed={x.u.consumed} target={x.u.target} /> : x.st ? <Meter consumed={x.st.consumed_amount} target={x.st.target_amount} /> : "–"}</TableCell>
-                          <TableCell>{x.u ? <CoverageChip u={x.u} /> : <Chip tone="warn">sem seat</Chip>}</TableCell>
-                          <TableCell>{x.u ? <ActivityChip u={x.u} /> : "–"}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </Block>
+              <MembersBlock key={r.cc.id} r={r} d={d!} />
               <Block title="Ações">
                 <div className="flex flex-wrap gap-2">
                   {r.budget ? (

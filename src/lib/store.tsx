@@ -84,6 +84,7 @@ interface Store {
   deleteCostCenter: (id: string) => Promise<void>;
   moveUsers: (ccId: string, logins: string[], remove: boolean) => Promise<void>;
   bulkCreateUserBudgets: (logins: string[], amount: number) => Promise<void>;
+  bulkSetUserBudgets: (items: { login: string; amount: number }[]) => Promise<void>;
   // drawers
   openUser: string | null;
   openCC: string | null;
@@ -405,11 +406,36 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await reloadBudgets();
   }, [bp, logAdd, reloadBudgets]);
 
+  /** Cria ou edita, conforme o caso, o budget de usuário de cada login — usado na edição em lote por linha. */
+  const bulkSetUserBudgets = useCallback(async (items: { login: string; amount: number }[]) => {
+    let ok = 0;
+    const fails: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const { login, amount } = items[i];
+      setProgress({ label: `Salvando budgets (${i + 1}/${items.length}) — ${login}`, value: (i + 1) / items.length });
+      try {
+        const existing = budgets.find((b) => b.budget_scope === "user" && b.user?.toLowerCase() === login.toLowerCase());
+        if (existing) {
+          await gh(`${bp}/budgets/${existing.id}`, { method: "PATCH", body: { budget_amount: Math.round(amount), prevent_further_usage: true, budget_alerting: { will_alert: false, alert_recipients: [] } } });
+        } else {
+          await gh(`${bp}/budgets`, { method: "POST", body: budgetPayload({ scope: "user", user: login, amount }) });
+        }
+        ok++;
+      } catch (e) {
+        fails.push(`${login}: ${(e as ApiError).body?.message || (e as Error).message}`);
+      }
+    }
+    setProgress(null);
+    logAdd("Budgets de usuário em lote (edição)", fails.length ? "err" : "ok", `${ok} salvos, ${fails.length} falhas${fails.length ? " — " + fails.slice(0, 8).join("; ") : ""}`);
+    (fails.length ? toast.error : toast.success)(`${ok} budgets salvos${fails.length ? `, ${fails.length} falhas (veja o histórico)` : ""}`);
+    await reloadBudgets();
+  }, [bp, budgets, logAdd, reloadBudgets]);
+
   const value: Store = {
     config, configError, ent, me, cc, budgets, seats, usage, userStates, ccUsage, usageRange, usageRangeSpan, d, loadedAt, loading, progress, rate, error, log,
     clearLog: () => setLog([]),
     loadAll, reloadBudgets, reloadCC, loadCCUsage, loadUsageRange, billing, loadBilling, runAction,
-    createBudget, editBudget, deleteBudget, deleteBudgets, createCostCenters, deleteCostCenter, moveUsers, bulkCreateUserBudgets,
+    createBudget, editBudget, deleteBudget, deleteBudgets, createCostCenters, deleteCostCenter, moveUsers, bulkCreateUserBudgets, bulkSetUserBudgets,
     openUser, openCC, showUser: setOpenUser, showCC: setOpenCC,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
